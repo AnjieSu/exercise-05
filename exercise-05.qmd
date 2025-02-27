@@ -1,0 +1,208 @@
+---
+title: "exercise-05"
+format: html
+editor: visual
+---
+
+## Packages
+
+```{r}
+library(tidyverse)
+library(mosaic)
+library(dplyr)
+```
+
+## Challenge 1
+
+```{r}
+d <- read_csv("https://raw.githubusercontent.com/difiore/ada-datasets/main/IMDB-movies.csv")
+
+d <- d %>% filter(
+  startYear >= 1920 & startYear <= 1979 & runtimeMinutes >= 60 & runtimeMinutes <= 180
+) %>% mutate(
+  decade = case_when(
+    startYear >= 1920 & startYear < 1930 ~ "20s",
+    startYear >= 1930 & startYear < 1940 ~ "30s",
+    startYear >= 1940 & startYear < 1950 ~ "40s",
+    startYear >= 1950 & startYear < 1960 ~ "50s",
+    startYear >= 1960 & startYear < 1970 ~ "60s",
+    startYear >= 1970 & startYear < 1980 ~ "70s"
+))
+
+ggplot(d, aes(x = runtimeMinutes)) + 
+  geom_histogram() + 
+  facet_wrap(~decade)
+
+results <- d %>% group_by(
+  decade
+) %>% summarise(
+  mean = mean(runtimeMinutes),
+  sd = sqrt(mean((runtimeMinutes - mean(runtimeMinutes, na.rm = TRUE))^2)),
+  se = sd/sqrt(100)
+)
+
+d_sample <- d %>% group_by(
+  decade
+) %>% slice_sample(
+  n = 100
+) %>% summarise(
+  mean = mean(runtimeMinutes),
+  sd = sd(runtimeMinutes)
+)
+
+d_sample <- d_sample %>% mutate(
+  se = sd / sqrt(100)
+)
+
+# The sample means closely match the population means, confirming representativeness, while small differences arise from sampling variability. SE estimates are also similar but vary slightly due to sample SD fluctuations.
+
+reps <- 1000
+n = 100
+decades <- unique(d$decade)
+
+myList <- list()
+for (i in decades) {
+  subset <- d %>% filter(
+    decade == i
+    )
+  sampling_dist <- do(reps) * {
+  sampled_data <- sample_n(subset, size = n, replace = FALSE)
+  tibble(
+    mean = mean(sampled_data$runtimeMinutes), 
+    sd = sd(sampled_data$runtimeMinutes)
+  )
+}
+  myList[[i]] <- sampling_dist %>%
+    mutate(decade = i)
+  print(i)
+}
+
+sampling_distribution <- bind_rows(myList)
+sampling_distribution <- sampling_distribution[, -c(3:4)]
+
+sampling_stats <- sampling_distribution %>% group_by(
+  decade
+  ) %>% summarise(
+    sample_mean = mean(mean), 
+    sample_sd = sd(mean)
+  )
+
+ggplot(sampling_distribution, aes(x = mean)) + 
+  geom_histogram() + 
+  facet_wrap(~decade)
+
+ggplot(sampling_distribution, aes(x = sd)) + 
+  geom_histogram() + 
+  facet_wrap(~decade)
+
+# The shapes are normal distribution.
+
+# The mean estimated from the sampling distribution is overall very close to the direct measurement from the population. The SE estimated from the sampling distribution closely matches the theoretical population SE for larger decades (e.g., 70s) but is lower for smaller decades (e.g., 20s). This suggests that as population size increases, the sampling distribution better approximates the theoretical SE, while for smaller populations, resampling captures less variation, leading to an artificially lower SE estimate.
+```
+
+## Challenge 2
+```{r}
+z <- read_csv("https://raw.githubusercontent.com/difiore/ada-datasets/main/zombies.csv")
+
+population_stats <- z %>% summarise(
+    across(
+      c(height, weight, age, zombies_killed, years_of_education),
+      list(mean = ~mean(.x, na.rm = TRUE),
+           sd = ~sd(.x, na.rm = TRUE) * sqrt((length(.x) - 1) / length(.x))
+      )
+    )
+  )
+
+ggplot(z, aes(x = gender, y = height)) + 
+  geom_boxplot()
+
+ggplot(z, aes(x = gender, y = weight)) + 
+  geom_boxplot()
+
+ggplot(z, aes(x = gender, y = age)) + 
+  geom_boxplot()
+
+ggplot(z, aes(x = gender, y = zombies_killed)) + 
+  geom_boxplot()
+
+ggplot(z, aes(x = gender, y = years_of_education)) + 
+  geom_boxplot()
+
+ggplot(z, aes(x = age, y = height, color = gender)) + 
+  geom_point()
+
+ggplot(z, aes(x = age, y = weight, color = gender)) + 
+  geom_point()
+
+# Both height and weight show a positive correlation with age in both genders. However, the relationship between weight and age appears weaker, with more scattered points.
+
+vars <- c("height", "weight", "age", "zombies_killed", "years_of_education")
+par(mfrow = c(2, 5))  
+for (var in vars) {
+  hist(z[[var]], main = var)
+
+  qqnorm(z[[var]], main = var)
+  qqline(z[[var]])
+}
+# zombies_killed and years_of_education are not normally distributed. They are discrete and right-skewed, resembling a Poisson-like pattern.
+
+n = 50
+z_sample <- z %>% slice_sample(n = n)
+ci <- z_sample %>%
+  reframe(across(
+    c(height, weight, age, zombies_killed, years_of_education),
+    ~ mean(.x) + qnorm(c(0.025, 0.975)) * (sd(.x) / sqrt(n))
+  ))
+
+reps = 199
+z_sample_all_stats <- do(reps) * {
+  sample_z <- z %>% slice_sample(n = n) %>%
+    reframe(across(
+    c(height, weight, age, zombies_killed, years_of_education),
+    list(mean = ~mean(.x, na.rm = TRUE))))
+}
+z_sample_all_stats <- z_sample_all_stats[, -c(6:7)]
+z_sample_stats <- z_sample %>% reframe(across(
+    c(height, weight, age, zombies_killed, years_of_education),
+    list(mean = ~mean(.x, na.rm = TRUE))))
+z_sample_all_stats <- rbind(z_sample_all_stats, z_sample_stats)
+
+z_sample_stats_stats <- z_sample_all_stats %>% reframe(
+  across(everything(), list(mean = mean, sd = sd))
+  )
+z_sample_se <- z_sample %>%
+  reframe(across(
+    c(height, weight, age, zombies_killed, years_of_education),
+    ~(sd(.x) / sqrt(n))))
+# The standard deviations of the sampling distribution for each variable closely match the standard errors estimated from the first sample of size 50.
+
+for (i in 1:5) {
+  hist(z_sample_all_stats[[i]], main = colnames(z_sample_all_stats)[i])
+}
+# The sampling distributions for all variables appear approximately normal, even for those variables that were not originally normally distributed.
+
+sample_ci <- z_sample_all_stats %>%
+  reframe(across(
+    c(height_mean, weight_mean, age_mean, zombies_killed_mean, years_of_education_mean),
+    ~ quantile(.x, c(0.025, 0.975))
+      )
+    )
+# The 95% CI derived from the sampling distribution are not exactly the same as those estimated from the first sample using the standard error formula, but they are similar.
+
+n_boot <- 1000
+n <- 50
+
+myList <- list()
+for (var in vars) {
+  boot <- vector(length = n_boot) 
+  for (i in 1:n_boot) {
+    subset <- sample(z[[var]], n, replace = TRUE)
+    boot[i] <- mean(subset)
+  }
+  myList[[var]] <- quantile(boot, probs = c(0.025, 0.975))
+}
+
+boot_ci <- boot_ci <- do.call(rbind, myList)
+# The 95% confidence intervals derived from bootstrapping are similar to those obtained from the sampling distribution in Step 9.
+```
+
